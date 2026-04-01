@@ -1,0 +1,57 @@
+# Example Prometheus alerting rules for RestoCafe OS pilot environments.
+# Adjust thresholds to your traffic; wire receivers in Alertmanager separately.
+#
+# Runbooks (paste into annotations.runbook_url or description):
+#   - docs/operations/SUPPORT_DIAGNOSTICS_WORKFLOW.md
+#   - docs/operations/SUPPORT_INCIDENT_TRIAGE.md
+#   - docs/operations/OBSERVABILITY.md
+#
+# Metrics names assume defaults from apps/api Prometheus integration (OBSERVABILITY.md §3).
+
+groups:
+  - name: restocafe_pilot
+    rules:
+      - alert: RestoCafeHigh5xxRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m])) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Elevated 5xx rate on restocafe-api"
+          description: "Investigate logs and unhandled_exception; confirm blast radius (tenant vs global)."
+          runbook: "https://github.com/your-org/your-repo/blob/main/docs/operations/SUPPORT_DIAGNOSTICS_WORKFLOW.md"
+
+      - alert: RestoCafeUnhandledErrors
+        expr: |
+          increase(http_unhandled_errors_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Unhandled errors in restocafe-api"
+          description: "Search logs for unhandled_exception; collect x-request-id from customer if applicable."
+          runbook: "https://github.com/your-org/your-repo/blob/main/docs/operations/SUPPORT_INCIDENT_TRIAGE.md"
+
+      - alert: RestoCafeReadyProbeFailing
+        expr: |
+          absent(up{job="restocafe-api"}) == 0
+        # Replace with your scrape job; or use blackbox exporter against /api/v1/health/ready
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "API readiness or scrape failure"
+          description: "Check DB connectivity and /api/v1/health/ready from the same path customers use."
+          runbook: "https://github.com/your-org/your-repo/blob/main/docs/operations/OBSERVABILITY.md"
+
+      - alert: RestoCafeBusinessOrderPaidFlatline
+        expr: |
+          rate(restocafe_business_events_total{event="order_paid"}[1h]) == 0
+        for: 2h
+        labels:
+          severity: warning
+        annotations:
+          summary: "No order_paid events during expected service hours"
+          description: "Tune for_time and business hours; may be false positive if venue closed."
+          runbook: "https://github.com/your-org/your-repo/blob/main/docs/operations/OBSERVABILITY.md"

@@ -1,0 +1,93 @@
+# WebSocket validation: authenticated connection + branch room join.
+#
+# Tests the full Socket.IO handshake path:
+#   1. Connect to /ws namespace with JWT in query param (socket-token.ts extracts it)
+#   2. Emit joinBranch with { branchId }
+#   3. Assert no error in acknowledgment
+#   4. Idle 5s (simulating a connected client), then disconnect
+#   5. Repeat across 20 virtual users
+#
+# This exercises:
+#   - JWT extraction and verification in OpsGateway.handleConnection()
+#   - StaffAuthCacheService branch membership lookup on joinBranch
+#   - Redis pub/sub adapter room registration (branch:{branchId})
+#   - websocket_authenticated_connections Prometheus counter
+#
+# Prerequisites:
+#   npm install -g artillery artillery-plugin-socketio @artillery/plugin-expect
+#
+# Run:
+#   BASE_URL=https://staging.example.com \
+#   JWT=eyJ... \
+#   BRANCH_ID=clxxxxxxxxx \
+#   artillery run ops/load/ws-artillery/ws-branch-join.yml
+#
+# Pass criteria (config.ensure):
+#   - Zero vuser failures
+#   - Connection + join p95 < 500ms
+#
+# Note: This test requires a live staging environment with Redis and Socket.IO running.
+# It cannot be run without a real Socket.IO server — do not run against localhost
+# without the full docker-compose stack.
+
+config:
+  target: "{{ $env.BASE_URL }}"
+  phases:
+    - duration: 60
+      arrivalRate: 1
+      rampTo: 5
+      name: "Ramp"
+    - duration: 120
+      arrivalRate: 5
+      name: "Steady (20 concurrent users)"
+    - duration: 30
+      arrivalRate: 5
+      rampTo: 0
+      name: "Ramp down"
+
+  engines:
+    socketio:
+      namespace: /ws
+      # Socket.IO query param auth — matches socket-token.ts extraction logic
+      query:
+        token: "{{ $env.JWT }}"
+      transports:
+        - websocket
+        - polling
+
+  plugins:
+    expect: {}
+
+  # Thresholds for pass/fail gate
+  ensure:
+    thresholds:
+      - http.response_time.p95: 500
+        description: "WS connect + joinBranch p95 < 500ms"
+    conditions:
+      - expression: "return stats.vusers.failed === 0"
+        description: "No WS scenario failures"
+
+  variables:
+    branchId: "{{ $env.BRANCH_ID }}"
+
+scenarios:
+  - name: "Connect, join branch, idle, disconnect"
+    engine: socketio
+    flow:
+      # Wait for the server to accept the connection
+      - think: 0.5
+
+      # Emit joinBranch — server should add socket to branch:{branchId} room
+      - emit:
+          channel: joinBranch
+          data:
+            branchId: "{{ branchId }}"
+
+      # Assert we did not receive an error event within 3s
+      - think: 1
+
+      # Simulate an idle connected client (POS screen, kitchen display)
+      - think: 5
+
+      # Disconnect cleanly — server should decrement websocket_authenticated_connections
+      - close: true

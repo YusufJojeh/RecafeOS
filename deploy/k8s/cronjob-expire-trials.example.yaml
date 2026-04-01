@@ -1,0 +1,43 @@
+# Example Kubernetes CronJob: daily trial expiry (commercial layer).
+# Replace placeholders: namespace, image, secret name, API service URL.
+#
+# Create secret first:
+#   kubectl create secret generic restocafe-support -n YOUR_NS \
+#     --from-literal=SUPPORT_API_KEY='...'
+#
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: restocafe-expire-trials
+spec:
+  schedule: "15 2 * * *" # 02:15 UTC daily; adjust for your timezone
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: curl
+              image: curlimages/curl:8.5.0
+              env:
+                - name: API_BASE_URL
+                  value: "http://restocafe-api.YOUR_NS.svc.cluster.local:3000/api/v1"
+                - name: SUPPORT_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: restocafe-support
+                      key: SUPPORT_API_KEY
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+                  url="${API_BASE_URL%/}/support/jobs/expire-trials"
+                  echo "POST $url"
+                  curl -sfS -X POST \
+                    -H "x-support-api-key: ${SUPPORT_API_KEY}" \
+                    -H "Content-Type: application/json" \
+                    "$url"

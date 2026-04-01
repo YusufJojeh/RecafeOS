@@ -1,0 +1,25 @@
+# Git and IDE
+.git
+.github
+.cursor
+**/.DS_Store
+
+# Dependencies and build outputs (rebuilt in image)
+**/node_modules
+**/dist
+**/coverage
+**/.turbo
+
+# Secrets — never copy into build context
+**/.env
+**/.env.*
+!**/.env.example
+
+# Docs and tests (not needed for API image)
+**/test
+**/e2e
+**/*.spec.ts
+docs
+
+# Frontend app source (API image does not need ops-web)
+apps/ops-web

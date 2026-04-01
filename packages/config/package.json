@@ -1,0 +1,6 @@
+{
+  "name": "@restocafe/config",
+  "version": "0.0.1",
+  "private": true,
+  "files": ["tsconfig.base.json", "eslint-preset.js"]
+}

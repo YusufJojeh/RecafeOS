@@ -1,0 +1,67 @@
+# Example production-style stack (VPS). Use a real env file on the server — never commit secrets.
+#
+#   docker compose -f deploy/docker-compose.stack.yml --env-file /etc/restocafe/api.env up -d
+#
+# Migrations: prefer `pnpm run db:migrate:deploy` from CI before rollout. For single-node only,
+# you may set RUN_MIGRATIONS_ON_START=true once.
+# Serve ops-web with Nginx/Caddy on the host using deploy/nginx/restocafe.conf.example.
+# See docs/operations/DEPLOYMENT_DEVOPS.md
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-restocafe}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-restocafe}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-restocafe} -d ${POSTGRES_DB:-restocafe}']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    image: restocafe-api:local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      IDEMPOTENCY_REQUIRE_REDIS: ${IDEMPOTENCY_REQUIRE_REDIS:-true}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?}
+      CORS_ORIGIN: ${CORS_ORIGIN:?}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:?}
+      TRUST_PROXY: ${TRUST_PROXY:-true}
+      METRICS_ENABLED: ${METRICS_ENABLED:-true}
+      RUN_MIGRATIONS_ON_START: ${RUN_MIGRATIONS_ON_START:-false}
+    ports:
+      - '127.0.0.1:3000:3000'
+
+volumes:
+  pgdata:
+  redisdata:

@@ -1,0 +1,94 @@
+{
+  "_comment": "Canonical threshold registry for RestoCafe OS performance gates. Edit thresholds here; scripts read them at runtime via open('./thresholds.json'). All latencies in milliseconds.",
+
+  "smoke": {
+    "_desc": "2-min sanity check, 5 VUs, read-only. Runs on every push to main.",
+    "http_req_failed_rate": 0.02,
+    "http_req_duration_p95_ms": 1500
+  },
+
+  "pilot": {
+    "_desc": "~25 VUs + 4 writers, 8 min. Gate for every RC tag and post-infra-change.",
+    "http_req_failed_rate": 0.02,
+    "pilot_write_failures_count": 8,
+    "health_p95_ms": 800,
+    "read_p95_ms": 2000,
+    "write_p95_ms": 5000
+  },
+
+  "growth": {
+    "_desc": "~45 VUs + 8 writers, 12 min. Gate before GA and after major infra changes.",
+    "http_req_failed_rate": 0.02,
+    "growth_write_failures_count": 16,
+    "health_p95_ms": 500,
+    "read_p95_ms": 1500,
+    "read_p99_ms": 4000,
+    "write_p95_ms": 8000
+  },
+
+  "soak": {
+    "_desc": "15 VUs, 35 min (5-min ramp up/down). Weekly stability gate.",
+    "http_req_failed_rate": 0.02,
+    "soak_late_failures_count": 5,
+    "read_p95_ms": 2500,
+    "write_p95_ms": 6000
+  },
+
+  "concurrency": {
+    "_desc": "20 VUs racing to close the same order. Idempotency and FSM gate. Runs every RC tag.",
+    "http_req_failed_rate": 0.01,
+    "concurrent_close_errors_count": 0,
+    "concurrent_close_p95_ms": 3000,
+    "concurrent_close_p99_ms": 5000,
+    "post_paid_rejection_rate_min": 0.95
+  },
+
+  "benchmark": {
+    "_desc": "1 VU, isolated per-endpoint. Monthly baseline capture; commit output to ops/load/out/baseline-YYYY-MM.json.",
+    "health_p95_ms": 50,
+    "health_p99_ms": 150,
+    "menu_p95_ms": 200,
+    "menu_p99_ms": 500,
+    "orders_p95_ms": 300,
+    "orders_p99_ms": 700,
+    "kitchen_p95_ms": 250,
+    "kitchen_p99_ms": 600,
+    "reports_p95_ms": 2000,
+    "reports_p99_ms": 5000,
+    "order_create_p95_ms": 600,
+    "order_create_p99_ms": 1500,
+    "order_close_p95_ms": 1200,
+    "order_close_p99_ms": 2500
+  },
+
+  "websocket": {
+    "_desc": "Artillery Socket.IO scenarios. Manual pre-release gate only.",
+    "connect_join_p95_ms": 500,
+    "connect_join_p99_ms": 1200,
+    "event_delivery_max_ms": 2000,
+    "reconnect_max_ms": 3000,
+    "vusers_failed_count": 0
+  },
+
+  "regression_warn_pct": 15,
+  "regression_block_pct": 30,
+
+  "_endpoint_targets": {
+    "_desc": "Reference targets per endpoint for the interpretation guide. Not used by k6 directly.",
+    "GET /health/live":                  { "p95_ms": 50,   "p99_ms": 150,  "error_rate_max": 0.0  },
+    "GET /health/ready":                 { "p95_ms": 100,  "p99_ms": 300,  "error_rate_max": 0.0  },
+    "GET /branches/:id/tables":          { "p95_ms": 250,  "p99_ms": 600,  "error_rate_max": 0.005 },
+    "GET /branches/:id/orders":          { "p95_ms": 350,  "p99_ms": 800,  "error_rate_max": 0.005 },
+    "GET /branches/:id/menu/categories": { "p95_ms": 200,  "p99_ms": 500,  "error_rate_max": 0.005 },
+    "GET /branches/:id/kitchen/tickets": { "p95_ms": 250,  "p99_ms": 600,  "error_rate_max": 0.005 },
+    "GET /branches/:id/bar/tickets":     { "p95_ms": 250,  "p99_ms": 600,  "error_rate_max": 0.005 },
+    "GET /branches/:id/reports/daily":   { "p95_ms": 500,  "p99_ms": 3000, "error_rate_max": 0.01  },
+    "POST /branches/:id/orders":         { "p95_ms": 600,  "p99_ms": 1500, "error_rate_max": 0.005 },
+    "POST /orders/:id/items":            { "p95_ms": 400,  "p99_ms": 900,  "error_rate_max": 0.005 },
+    "POST /orders/:id/confirm":          { "p95_ms": 300,  "p99_ms": 700,  "error_rate_max": 0.005 },
+    "POST /orders/:id/send-to-prep":     { "p95_ms": 400,  "p99_ms": 1000, "error_rate_max": 0.005 },
+    "PATCH /kitchen/tickets/:id":        { "p95_ms": 300,  "p99_ms": 700,  "error_rate_max": 0.005 },
+    "POST /orders/:id/served":           { "p95_ms": 300,  "p99_ms": 700,  "error_rate_max": 0.005 },
+    "POST /orders/:id/close":            { "p95_ms": 1200, "p99_ms": 2500, "error_rate_max": 0.005 }
+  }
+}

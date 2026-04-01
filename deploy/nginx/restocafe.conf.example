@@ -1,0 +1,47 @@
+# Example Nginx site for RestoCafe OS (TLS usually added at host or via certbot).
+# - SPA: static files from ops-web `npm run build` output
+# - API: reverse proxy to Node (same host or Docker service name `api`)
+#
+# Replace server_name and upstream; enable HTTPS when ready.
+#
+# Multi-replica API: list each backend (or Docker service IPs). With Socket.IO
+# @socket.io/redis-adapter + REDIS_URL on every API instance, broadcast correctness
+# does not require cookie/session affinity—optional affinity only reduces reconnect churn.
+
+upstream restocafe_api {
+    server 127.0.0.1:3000;
+    # Second replica example:
+    # server 127.0.0.1:3001;
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # SPA: client-side routes
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_pass http://restocafe_api;
+    }
+
+    # Socket.IO (if browser connects to same origin under /socket.io — adjust if using path prefix)
+    location /socket.io/ {
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_pass http://restocafe_api;
+    }
+}

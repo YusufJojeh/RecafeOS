@@ -1,0 +1,154 @@
+# WebSocket validation: event delivery timing after REST mutations.
+#
+# Validates that branch-scoped WebSocket events emitted by the REST API
+# (via OpsGateway.emitBranchEvent) are received by connected clients
+# within the expected delivery window (< 2000ms after the triggering HTTP call).
+#
+# Key events tested:
+#   order.created    → triggered by POST /branches/:id/orders
+#   ticket.updated   → triggered by PATCH /kitchen/tickets/:id
+#   order.paid       → triggered by POST /orders/:id/close
+#
+# Architecture under test:
+#   REST call → OrderCreationService.emit(ORDER_CREATED) →
+#   OpsGateway.emitBranchEvent() → Socket.IO RedisAdapter →
+#   Redis pub/sub → all API replicas → connected sockets in branch:{branchId}
+#
+# This script uses two concurrent user flows:
+#   - listener: Connects + joins branch + listens for events
+#   - trigger:  Makes REST API calls that fire events
+#
+# Expected result: listener receives events within EVENT_DELIVERY_MAX_MS.
+#
+# IMPORTANT: This test is inherently harder to automate precisely in Artillery
+# because event timing across two concurrent virtual users requires coordination.
+# Use this script for manual validation with --output and review the timeline.
+# For automated CI, the listener flow's "think" times approximate the delivery
+# window — a failed scenario indicates the connection or join is broken.
+#
+# For exact event delivery timing measurement, prefer:
+#   - Integration tests in test/integration/
+#   - Manual staging validation checklist (see performance-validation-strategy.md)
+#
+# Prerequisites: same as ws-branch-join.yml
+#
+# Run:
+#   BASE_URL=https://staging.example.com \
+#   JWT=eyJ... \
+#   BRANCH_ID=clxxxxxxxxx \
+#   MENU_ITEM_ID=clxxxxxxxxx \
+#   TABLE_SESSION_ID=clxxxxxxxxx \
+#   artillery run ops/load/ws-artillery/ws-event-delivery.yml --output ws-event-delivery-report.json
+#   artillery report ws-event-delivery-report.json
+
+config:
+  target: "{{ $env.BASE_URL }}"
+  phases:
+    - duration: 60
+      arrivalRate: 1
+      name: "Sequential event delivery validation"
+
+  engines:
+    socketio:
+      namespace: /ws
+      query:
+        token: "{{ $env.JWT }}"
+      transports:
+        - websocket
+        - polling
+
+  plugins:
+    expect: {}
+
+  ensure:
+    conditions:
+      - expression: "return stats.vusers.failed === 0"
+        description: "No event delivery scenario failures"
+
+  variables:
+    branchId: "{{ $env.BRANCH_ID }}"
+    menuItemId: "{{ $env.MENU_ITEM_ID }}"
+    tableSessionId: "{{ $env.TABLE_SESSION_ID }}"
+    authHeader: "Bearer {{ $env.JWT }}"
+    branchHeader: "{{ $env.BRANCH_ID }}"
+
+scenarios:
+  # ── Listener: connect and stay ready to receive events ─────────────────────
+  - name: "Event listener (WebSocket)"
+    engine: socketio
+    flow:
+      - think: 0.5
+
+      - emit:
+          channel: joinBranch
+          data:
+            branchId: "{{ branchId }}"
+
+      # Stay connected long enough to receive events from the trigger flow
+      # The trigger flow fires after ~5s; we listen for 20s total.
+      - think: 20
+
+      - close: true
+
+  # ── Trigger: REST calls that produce WebSocket events ──────────────────────
+  - name: "Event trigger (REST API)"
+    flow:
+      # Give the listener time to connect and join
+      - think: 5
+
+      # Fire order.created event
+      - post:
+          url: "/api/v1/branches/{{ branchId }}/orders"
+          headers:
+            Authorization: "{{ authHeader }}"
+            X-Branch-Id: "{{ branchHeader }}"
+            Content-Type: application/json
+          json:
+            type: TAKEAWAY
+          capture:
+            - json: "$.id"
+              as: orderId
+
+      - think: 1
+
+      # Add an item to trigger order.updated
+      - post:
+          url: "/api/v1/branches/{{ branchId }}/orders/{{ orderId }}/items"
+          headers:
+            Authorization: "{{ authHeader }}"
+            X-Branch-Id: "{{ branchHeader }}"
+            Content-Type: application/json
+          json:
+            menuItemId: "{{ menuItemId }}"
+            quantity: 1
+
+      - think: 1
+
+      # Confirm order
+      - post:
+          url: "/api/v1/branches/{{ branchId }}/orders/{{ orderId }}/confirm"
+          headers:
+            Authorization: "{{ authHeader }}"
+            X-Branch-Id: "{{ branchHeader }}"
+
+      - think: 0.5
+
+      # Send to preparation — triggers order.sent_to_preparation + ticket creation
+      - post:
+          url: "/api/v1/branches/{{ branchId }}/orders/{{ orderId }}/send-to-preparation"
+          headers:
+            Authorization: "{{ authHeader }}"
+            X-Branch-Id: "{{ branchHeader }}"
+
+      # Cancel the order — we don't need a full lifecycle for event delivery testing
+      - think: 2
+      - post:
+          url: "/api/v1/branches/{{ branchId }}/orders/{{ orderId }}/cancel"
+          headers:
+            Authorization: "{{ authHeader }}"
+            X-Branch-Id: "{{ branchHeader }}"
+            Content-Type: application/json
+          json:
+            reason: customer_request
+
+      - think: 3

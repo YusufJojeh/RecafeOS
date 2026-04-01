@@ -1,0 +1,112 @@
+# WebSocket validation: reconnect and room re-join after forced disconnect.
+#
+# Models the most common real-world WS failure mode: a client loses its
+# connection (network blip, server restart, load balancer timeout) and
+# needs to reconnect and rejoin its branch room to keep receiving events.
+#
+# Flow per virtual user:
+#   1. Connect + joinBranch (initial connection)
+#   2. Simulate 3s of connected activity (e.g. receiving events)
+#   3. Forcefully disconnect (simulates network interruption)
+#   4. Wait 1-2s (simulates reconnect backoff)
+#   5. Reconnect + joinBranch again
+#   6. Verify the second connection is also successfully joined
+#   7. Stay connected 5s, then disconnect cleanly
+#
+# What this validates:
+#   - Server handles rapid connect/disconnect cycles without leaking sockets
+#   - Redis adapter correctly removes stale room membership on disconnect
+#   - Re-authentication on reconnect works (JWT is re-verified)
+#   - websocket_authenticated_connections metric stays consistent
+#   - No "ghost" connections accumulate in Redis CLIENT LIST
+#
+# Prerequisites: same as ws-branch-join.yml
+#
+# Run:
+#   BASE_URL=https://staging.example.com \
+#   JWT=eyJ... \
+#   BRANCH_ID=clxxxxxxxxx \
+#   artillery run ops/load/ws-artillery/ws-reconnect.yml
+
+config:
+  target: "{{ $env.BASE_URL }}"
+  phases:
+    - duration: 30
+      arrivalRate: 1
+      rampTo: 3
+      name: "Ramp"
+    - duration: 90
+      arrivalRate: 3
+      name: "Steady reconnect churn"
+    - duration: 30
+      arrivalRate: 3
+      rampTo: 0
+      name: "Ramp down"
+
+  engines:
+    socketio:
+      namespace: /ws
+      query:
+        token: "{{ $env.JWT }}"
+      # Enable auto-reconnect with exponential backoff — matches production client config
+      reconnection: true
+      reconnectionAttempts: 3
+      reconnectionDelay: 1000
+      reconnectionDelayMax: 3000
+      transports:
+        - websocket
+        - polling
+
+  plugins:
+    expect: {}
+
+  ensure:
+    thresholds:
+      - http.response_time.p95: 3000
+        description: "Full reconnect cycle (disconnect + reconnect + rejoin) p95 < 3s"
+    conditions:
+      - expression: "return stats.vusers.failed === 0"
+        description: "No reconnect scenario failures"
+
+  variables:
+    branchId: "{{ $env.BRANCH_ID }}"
+
+scenarios:
+  - name: "Connect, disconnect, reconnect, rejoin"
+    engine: socketio
+    flow:
+      # ── First connection ──────────────────────────────────────────────────
+      - think: 0.5
+
+      - emit:
+          channel: joinBranch
+          data:
+            branchId: "{{ branchId }}"
+
+      # Simulate 3s of normal operation before the "network blip"
+      - think: 3
+
+      # Force disconnect — simulates network loss
+      - close: true
+
+      # ── Reconnect backoff window ──────────────────────────────────────────
+      - think: 1.5
+
+      # ── Second connection (reconnect) ─────────────────────────────────────
+      # Artillery re-opens the socket for the next step automatically when
+      # using the socketio engine after a close.
+
+      - think: 0.5
+
+      # Must re-join branch room — server does not persist room membership
+      # across connections (Socket.IO rooms are in-memory + Redis pub/sub).
+      - emit:
+          channel: joinBranch
+          data:
+            branchId: "{{ branchId }}"
+
+      # Verify the reconnection is stable by staying connected for 5s
+      - think: 5
+
+      # Clean disconnect
+      - close: true

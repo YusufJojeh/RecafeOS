@@ -1,0 +1,22 @@
+{
+  "moduleFileExtensions": ["js", "json", "ts"],
+  "rootDir": "..",
+  "testEnvironment": "node",
+  "testTimeout": 120000,
+  "testMatch": ["<rootDir>/test/integration/**/*.integration-spec.ts"],
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "setupFiles": ["<rootDir>/test/integration/jest-setup.ts"],
+  "collectCoverageFrom": [
+    "<rootDir>/src/**/*.ts",
+    "!<rootDir>/src/**/*.spec.ts",
+    "!<rootDir>/src/main.ts"
+  ],
+  "coverageDirectory": "<rootDir>/coverage-integration",
+  "coverageReporters": ["text-summary", "json-summary", "lcov"],
+  "moduleNameMapper": {
+    "^src/(.*)$": "<rootDir>/src/$1",
+    "^@restocafe/types$": "<rootDir>/../../packages/types/src/index.ts"
+  }
+}

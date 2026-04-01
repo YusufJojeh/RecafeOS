@@ -1,0 +1,26 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "API (NestJS)",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["../../node_modules/@nestjs/cli/bin/nest.js", "start", "--watch", "--preserveWatchOutput"],
+      "cwd": "apps/api",
+      "port": 3000
+    },
+    {
+      "name": "Ops Web (Vite)",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["../../node_modules/vite/bin/vite.js", "--port", "5173"],
+      "cwd": "apps/ops-web",
+      "port": 5173
+    },
+    {
+      "name": "Landing Page (Vite)",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["../../node_modules/vite/bin/vite.js", "--port", "5174"],
+      "cwd": "apps/ops-web",
+      "port": 5174
+    }
+  ]
+}

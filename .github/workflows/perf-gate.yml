@@ -1,0 +1,427 @@
+name: Performance Gate
+
+# Triggers:
+#   push to main          → smoke test (fast, ~2 min)
+#   release created       → RC gate: benchmark + pilot + concurrency (~25 min)
+#   workflow_dispatch     → manual run of any suite against staging
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Test suite to run"
+        required: true
+        default: pilot
+        type: choice
+        options:
+          - smoke
+          - pilot
+          - concurrency
+          - growth
+          - soak
+          - benchmark
+      compare_baseline:
+        description: "Artifact name of baseline to compare against (leave blank to skip)"
+        required: false
+        default: ""
+
+# Secret contract:
+#   STAGING_BASE_URL      — API origin (e.g. https://staging.example.com, no trailing slash)
+#   STAGING_PERF_JWT      — Staff access token with tables, orders, kitchen, bar, payments, reports permissions
+#   STAGING_PERF_BRANCH_ID — Branch CUID for X-Branch-Id header
+#
+# Smoke tests on forks skip with a visible warning annotation.
+# RC and manual jobs FAIL HARD if secrets are missing — a silent skip on a release gate
+# can be mistaken for a pass.
+
+jobs:
+  # ── Smoke (every push to main) ─────────────────────────────────────────────
+
+  perf-smoke:
+    name: Smoke (push to main)
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check staging secrets available
+        id: secrets-check
+        run: |
+          if [[ -z "${{ secrets.STAGING_BASE_URL }}" ]]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::STAGING_BASE_URL secret not set — smoke test SKIPPED. Configure secrets to enable: STAGING_BASE_URL, STAGING_PERF_JWT, STAGING_PERF_BRANCH_ID."
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install k6
+        if: steps.secrets-check.outputs.available == 'true'
+        run: |
+          sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg \
+            < <(curl -fsSL https://dl.k6.io/key.gpg)
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] \
+            https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update -qq && sudo apt-get install -y k6
+
+      - name: Run smoke test
+        if: steps.secrets-check.outputs.available == 'true'
+        env:
+          BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+          JWT: ${{ secrets.STAGING_PERF_JWT }}
+          BRANCH_ID: ${{ secrets.STAGING_PERF_BRANCH_ID }}
+        run: |
+          mkdir -p ops/load/out
+          k6 run \
+            -e BASE_URL="${BASE_URL}" \
+            -e JWT="${JWT}" \
+            -e BRANCH_ID="${BRANCH_ID}" \
+            --summary-export=ops/load/out/smoke.json \
+            ops/load/staging-smoke.k6.js
+
+      - name: Annotate smoke result
+        if: steps.secrets-check.outputs.available == 'true' && always()
+        run: |
+          if [[ -f ops/load/out/smoke.json ]]; then
+            echo "### Smoke test results" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            node -e "
+              const d = JSON.parse(require('fs').readFileSync('ops/load/out/smoke.json','utf8'));
+              const m = Object.fromEntries(Object.entries(d.metrics||{}).filter(([k])=>k.includes('http_req')));
+              console.log(JSON.stringify(m,null,2));
+            " >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "(summary parse failed)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload smoke results
+        if: steps.secrets-check.outputs.available == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-smoke-${{ github.sha }}
+          path: ops/load/out/smoke.json
+          retention-days: 30
+
+  # ── RC gate (on release): benchmark → pilot → concurrency ────────────────
+
+  perf-rc-benchmark:
+    name: RC gate — benchmark baseline
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require staging secrets (release gate must not silently skip)
+        env:
+          BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+          JWT: ${{ secrets.STAGING_PERF_JWT }}
+          BRANCH_ID: ${{ secrets.STAGING_PERF_BRANCH_ID }}
+        run: |
+          missing=""
+          [[ -z "$BASE_URL" ]] && missing="${missing} STAGING_BASE_URL"
+          [[ -z "$JWT" ]] && missing="${missing} STAGING_PERF_JWT"
+          [[ -z "$BRANCH_ID" ]] && missing="${missing} STAGING_PERF_BRANCH_ID"
+          if [[ -n "$missing" ]]; then
+            echo "::error::Release performance gate BLOCKED — missing secrets:${missing}. A release without perf validation is not allowed."
+            exit 1
+          fi
+
+      - name: Install k6
+        run: |
+          sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg \
+            < <(curl -fsSL https://dl.k6.io/key.gpg)
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] \
+            https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update -qq && sudo apt-get install -y k6
+
+      - name: Run benchmark baseline
+        env:
+          BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+          JWT: ${{ secrets.STAGING_PERF_JWT }}
+          BRANCH_ID: ${{ secrets.STAGING_PERF_BRANCH_ID }}
+        run: |
+          mkdir -p ops/load/out
+          k6 run \
+            -e BASE_URL="${BASE_URL}" \
+            -e JWT="${JWT}" \
+            -e BRANCH_ID="${BRANCH_ID}" \
+            --summary-export=ops/load/out/benchmark.json \
+            ops/load/benchmark-baselines.k6.js
+
+      - name: Upload benchmark baseline
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-benchmark-${{ github.ref_name }}
+          path: ops/load/out/benchmark.json
+          retention-days: 180
+
+  perf-rc-pilot:
+    name: RC gate — pilot
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [perf-rc-benchmark]  # Run after benchmark to avoid staging contention
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require staging secrets (release gate must not silently skip)
+        env:
+          BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+          JWT: ${{ secrets.STAGING_PERF_JWT }}
+          BRANCH_ID: ${{ secrets.STAGING_PERF_BRANCH_ID }}
+        run: |
+          missing=""
+          [[ -z "$BASE_URL" ]] && missing="${missing} STAGING_BASE_URL"
+          [[ -z "$JWT" ]] && missing="${missing} STAGING_PERF_JWT"
+          [[ -z "$BRANCH_ID" ]] && missing="${missing} STAGING_PERF_BRANCH_ID"
+          if [[ -n "$missing" ]]; then
+            echo "::error::Release performance gate BLOCKED — missing secrets:${missing}. A release without perf validation is not allowed."
+            exit 1
+          fi
+
+      - name: Setup Node.js (for compare-runs.js)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install k6
+        run: |
+          sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg \
+            < <(curl -fsSL https://dl.k6.io/key.gpg)
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] \
+            https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update -qq && sudo apt-get install -y k6
+
+      - name: Run pilot gate
+        env:
+          BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+          JWT: ${{ secrets.STAGING_PERF_JWT }}
+          BRANCH_ID: ${{ secrets.STAGING_PERF_BRANCH_ID }}
+        run: |
+          mkdir -p ops/load/out
+          k6 run \
+            -e BASE_URL="${BASE_URL}" \
+            -e JWT="${JWT}" \
+            -e BRANCH_ID="${BRANCH_ID}" \
+            --summary-export=ops/load/out/pilot.json \
+            ops/load/staging-pilot.k6.js
+
+      - name: Download benchmark for comparison
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          name: perf-benchmark-${{ github.ref_name }}
+          path: ops/load/out/baseline/
+        continue-on-error: true
+
+      - name: Compare pilot vs benchmark
+        if: always()
+        run: |
+          BASELINE_FILE=$(ls ops/load/out/baseline/*.json 2>/dev/null | head -1)
+          if [[ -n "$BASELINE_FILE" ]]; then
+            echo "### Pilot vs Benchmark comparison" >> "$GITHUB_STEP_SUMMARY"
+            node ops/load/compare-runs.js \
+              --baseline "${BASELINE_FILE}" \
+              --current ops/load/out/pilot.json \
+              --threshold 20 \
+              --warn-only >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
+          else
+            echo "::notice::No benchmark baseline available for comparison."
+          fi
+
+      - name: Upload pilot results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-pilot-${{ github.ref_name }}
+          path: ops/load/out/pilot.json
+          retention-days: 90
+
+  perf-rc-concurrency:
+    name: RC gate — concurrency
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [perf-rc-pilot]  # Run after pilot to avoid shared staging contention
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require staging secrets (release gate must not silently skip)
+        env:
+          BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+          JWT: ${{ secrets.STAGING_PERF_JWT }}
+          BRANCH_ID: ${{ secrets.STAGING_PERF_BRANCH_ID }}
+        run: |
+          missing=""
+          [[ -z "$BASE_URL" ]] && missing="${missing} STAGING_BASE_URL"
+          [[ -z "$JWT" ]] && missing="${missing} STAGING_PERF_JWT"
+          [[ -z "$BRANCH_ID" ]] && missing="${missing} STAGING_PERF_BRANCH_ID"
+          if [[ -n "$missing" ]]; then
+            echo "::error::Release performance gate BLOCKED — missing secrets:${missing}."
+            exit 1
+          fi
+
+      - name: Install k6
+        run: |
+          sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg \
+            < <(curl -fsSL https://dl.k6.io/key.gpg)
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] \
+            https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update -qq && sudo apt-get install -y k6
+
+      - name: Run concurrency gate
+        env:
+          BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+          JWT: ${{ secrets.STAGING_PERF_JWT }}
+          BRANCH_ID: ${{ secrets.STAGING_PERF_BRANCH_ID }}
+        run: |
+          mkdir -p ops/load/out
+          k6 run \
+            -e BASE_URL="${BASE_URL}" \
+            -e JWT="${JWT}" \
+            -e BRANCH_ID="${BRANCH_ID}" \
+            --summary-export=ops/load/out/concurrency.json \
+            ops/load/concurrency-payments.k6.js
+
+      - name: Annotate concurrency result
+        if: always()
+        run: |
+          if [[ -f ops/load/out/concurrency.json ]]; then
+            echo "### Concurrency test results" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            node -e "
+              const d = JSON.parse(require('fs').readFileSync('ops/load/out/concurrency.json','utf8'));
+              const m = Object.fromEntries(Object.entries(d.metrics||{}).filter(([k])=>k.includes('http_req')||k.includes('close')||k.includes('error')));
+              console.log(JSON.stringify(m,null,2));
+            " >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "(summary parse failed)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload concurrency results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-concurrency-${{ github.ref_name }}
+          path: ops/load/out/concurrency.json
+          retention-days: 90
+
+  # ── Manual dispatch ─────────────────────────────────────────────────────────
+
+  perf-manual:
+    name: Manual — ${{ github.event.inputs.suite }}
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50  # Soak runs 35 min + k6 install + overhead
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require staging secrets
+        env:
+          BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+          JWT: ${{ secrets.STAGING_PERF_JWT }}
+          BRANCH_ID: ${{ secrets.STAGING_PERF_BRANCH_ID }}
+        run: |
+          missing=""
+          [[ -z "$BASE_URL" ]] && missing="${missing} STAGING_BASE_URL"
+          [[ -z "$JWT" ]] && missing="${missing} STAGING_PERF_JWT"
+          [[ -z "$BRANCH_ID" ]] && missing="${missing} STAGING_PERF_BRANCH_ID"
+          if [[ -n "$missing" ]]; then
+            echo "::error::Missing secrets:${missing}. Configure repository secrets before running perf tests."
+            exit 1
+          fi
+
+      - name: Setup Node.js (for compare-runs.js)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install k6
+        run: |
+          sudo gpg --dearmor -o /usr/share/keyrings/k6-archive-keyring.gpg \
+            < <(curl -fsSL https://dl.k6.io/key.gpg)
+          echo "deb [signed-by=/usr/share/keyrings/k6-archive-keyring.gpg] \
+            https://dl.k6.io/deb stable main" | sudo tee /etc/apt/sources.list.d/k6.list
+          sudo apt-get update -qq && sudo apt-get install -y k6
+
+      - name: Map suite to script
+        id: suite-map
+        run: |
+          case "${{ github.event.inputs.suite }}" in
+            smoke)       echo "script=ops/load/staging-smoke.k6.js" >> "$GITHUB_OUTPUT" ;;
+            pilot)       echo "script=ops/load/staging-pilot.k6.js" >> "$GITHUB_OUTPUT" ;;
+            concurrency) echo "script=ops/load/concurrency-payments.k6.js" >> "$GITHUB_OUTPUT" ;;
+            growth)      echo "script=ops/load/growth-scale.k6.js" >> "$GITHUB_OUTPUT" ;;
+            soak)        echo "script=ops/load/soak-sustained.k6.js" >> "$GITHUB_OUTPUT" ;;
+            benchmark)   echo "script=ops/load/benchmark-baselines.k6.js" >> "$GITHUB_OUTPUT" ;;
+            *)           echo "Unknown suite" && exit 1 ;;
+          esac
+
+      - name: Run selected suite
+        env:
+          BASE_URL: ${{ secrets.STAGING_BASE_URL }}
+          JWT: ${{ secrets.STAGING_PERF_JWT }}
+          BRANCH_ID: ${{ secrets.STAGING_PERF_BRANCH_ID }}
+        run: |
+          mkdir -p ops/load/out
+          k6 run \
+            -e BASE_URL="${BASE_URL}" \
+            -e JWT="${JWT}" \
+            -e BRANCH_ID="${BRANCH_ID}" \
+            --summary-export=ops/load/out/${{ github.event.inputs.suite }}.json \
+            ${{ steps.suite-map.outputs.script }}
+
+      - name: Download baseline for comparison
+        if: github.event.inputs.compare_baseline != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.event.inputs.compare_baseline }}
+          path: ops/load/out/baseline/
+        continue-on-error: true
+
+      - name: Compare vs baseline
+        if: github.event.inputs.compare_baseline != ''
+        run: |
+          BASELINE_FILE=$(ls ops/load/out/baseline/*.json 2>/dev/null | head -1)
+          if [[ -n "$BASELINE_FILE" ]]; then
+            echo "### ${{ github.event.inputs.suite }} vs baseline comparison" >> "$GITHUB_STEP_SUMMARY"
+            node ops/load/compare-runs.js \
+              --baseline "${BASELINE_FILE}" \
+              --current ops/load/out/${{ github.event.inputs.suite }}.json \
+              --threshold 20 \
+              --warn-only >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
+          else
+            echo "No baseline file found in downloaded artifact."
+          fi
+
+      - name: Annotate result
+        if: always()
+        run: |
+          RESULT_FILE="ops/load/out/${{ github.event.inputs.suite }}.json"
+          if [[ -f "$RESULT_FILE" ]]; then
+            echo "### ${{ github.event.inputs.suite }} test results" >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            node -e "
+              const d = JSON.parse(require('fs').readFileSync('${RESULT_FILE}','utf8'));
+              const m = Object.fromEntries(Object.entries(d.metrics||{}).filter(([k])=>k.includes('http_req')||k.includes('error')||k.includes('fail')||k.includes('close')||k.includes('soak')));
+              console.log(JSON.stringify(m,null,2));
+            " >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || echo "(summary parse failed)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-${{ github.event.inputs.suite }}-${{ github.run_id }}
+          path: ops/load/out/${{ github.event.inputs.suite }}.json
+          retention-days: 90

@@ -1,0 +1,80 @@
+<svg width="1600" height="1100" viewBox="0 0 1600 1100" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="800" y1="0" x2="800" y2="1100" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#10211D"/>
+      <stop offset="1" stop-color="#08100F"/>
+    </linearGradient>
+    <radialGradient id="windowGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(801 352) rotate(90) scale(324 405)">
+      <stop stop-color="#F1D6A7" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#F1D6A7" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="emerald" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(1302 232) rotate(135.853) scale(345.89 218.392)">
+      <stop stop-color="#33D28F" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#33D28F" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blur" x="0" y="0" width="1600" height="1100" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="65"/>
+    </filter>
+  </defs>
+
+  <rect width="1600" height="1100" rx="48" fill="url(#bg)"/>
+  <g filter="url(#blur)">
+    <ellipse cx="801" cy="352" rx="252" ry="218" fill="url(#windowGlow)"/>
+    <ellipse cx="1302" cy="232" rx="216" ry="150" fill="url(#emerald)"/>
+  </g>
+
+  <rect x="124" y="150" width="1352" height="690" rx="46" fill="#0C1715" stroke="#28453D"/>
+  <rect x="208" y="232" width="1184" height="474" rx="30" fill="#101C1A" stroke="#345A4E"/>
+  <path d="M208 468H1392" stroke="#28453D"/>
+  <path d="M800 232V706" stroke="#28453D"/>
+  <path d="M520 232V706" stroke="#28453D"/>
+  <path d="M1080 232V706" stroke="#28453D"/>
+
+  <rect x="252" y="188" width="76" height="26" rx="13" fill="#1C352F"/>
+  <rect x="134" y="824" width="1332" height="136" rx="40" fill="#0A1412" stroke="#24413A"/>
+
+  <g opacity="0.95">
+    <ellipse cx="382" cy="866" rx="122" ry="26" fill="#091110"/>
+    <ellipse cx="800" cy="866" rx="122" ry="26" fill="#091110"/>
+    <ellipse cx="1218" cy="866" rx="122" ry="26" fill="#091110"/>
+
+    <circle cx="382" cy="752" r="84" fill="#11211E" stroke="#35594D"/>
+    <circle cx="800" cy="752" r="84" fill="#11211E" stroke="#35594D"/>
+    <circle cx="1218" cy="752" r="84" fill="#11211E" stroke="#35594D"/>
+
+    <rect x="352" y="632" width="60" height="132" rx="30" fill="#0F1C19"/>
+    <rect x="770" y="632" width="60" height="132" rx="30" fill="#0F1C19"/>
+    <rect x="1188" y="632" width="60" height="132" rx="30" fill="#0F1C19"/>
+  </g>
+
+  <g>
+    <ellipse cx="348" cy="278" rx="20" ry="20" fill="#D19857"/>
+    <ellipse cx="800" cy="260" rx="20" ry="20" fill="#D19857"/>
+    <ellipse cx="1252" cy="278" rx="20" ry="20" fill="#D19857"/>
+    <path d="M348 0V258" stroke="#7A6951"/>
+    <path d="M800 0V240" stroke="#7A6951"/>
+    <path d="M1252 0V258" stroke="#7A6951"/>
+  </g>
+
+  <g opacity="0.78">
+    <path d="M514 546C514 462 570 410 648 410C726 410 782 462 782 546V646H514V546Z" fill="#0A1412"/>
+    <rect x="562" y="646" width="36" height="136" rx="18" fill="#0A1412"/>
+    <rect x="694" y="646" width="36" height="136" rx="18" fill="#0A1412"/>
+    <circle cx="620" cy="332" r="64" fill="#0A1412"/>
+
+    <path d="M852 546C852 470 902 422 970 422C1038 422 1088 470 1088 546V646H852V546Z" fill="#0A1412"/>
+    <rect x="890" y="646" width="34" height="136" rx="17" fill="#0A1412"/>
+    <rect x="1014" y="646" width="34" height="136" rx="17" fill="#0A1412"/>
+    <circle cx="972" cy="350" r="58" fill="#0A1412"/>
+  </g>
+
+  <g>
+    <rect x="1116" y="164" width="254" height="140" rx="28" fill="#0E1918" stroke="#32574B"/>
+    <rect x="1148" y="196" width="94" height="18" rx="9" fill="#26453B"/>
+    <rect x="1148" y="238" width="190" height="14" rx="7" fill="#1B302B"/>
+    <rect x="1148" y="264" width="150" height="10" rx="5" fill="#253F38"/>
+    <path d="M1156 290L1200 260L1230 276L1282 230L1336 250" stroke="#4BE0A6" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <path d="M198 894H1402" stroke="#29453F" stroke-dasharray="12 12"/>
+</svg>
