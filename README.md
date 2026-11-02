@@ -421,3 +421,31 @@ DB docs:
 - Deployment assets and checklists live in `deploy/README.md` and `docs/operations/DEPLOYMENT_DEVOPS.md`.
 #   R e c a f e O S  
  
+
+## Portfolio summary
+
+### Problem
+Restaurants and cafés need synchronized order, kitchen, staff, and venue operations across branches, including when connectivity is unreliable.
+
+### Architecture
+```mermaid
+flowchart LR
+  Ops["React operations web"] --> API["NestJS API"]
+  API --> DB["PostgreSQL"]
+  API --> Cache["Redis"]
+  API --> Kitchen["WebSocket kitchen updates"]
+```
+
+### Key decisions
+- Enforce tenant and branch scope in the API.
+- Use WebSockets for live order and kitchen updates.
+- Support a local MySQL compatibility path while keeping PostgreSQL as the official production database.
+
+### How to run
+Follow [Getting Started](#-getting-started) and the official PostgreSQL path. Docker Compose starts local infrastructure.
+
+### Tests
+Use the test and verification commands in [Common Commands](#common-commands) and [Testing Strategy](#-testing-strategy). This README does not publish a single verified test total.
+
+### Status
+Public repo / local build.
