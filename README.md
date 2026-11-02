@@ -1,5 +1,58 @@
 # RestoCafe OS
 
+## Status
+
+In development — The repository contains a local application and test suites.
+
+## Problem
+
+Restaurant staff need one order state across the till, kitchen and branch operations. Multiple branches, concurrent edits and offline periods make order integrity and tenant scoping important.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  Staff --> Ops["apps/ops-web: React"]
+  Ops --> API["apps/api: NestJS"]
+  API --> Prisma["Prisma data layer"]
+  Prisma --> DB["PostgreSQL"]
+  API --> Redis["Redis: queues and realtime"]
+```
+
+## Key decisions
+
+- Branch and tenant scoping is enforced in backend queries, adding context to each operation while isolating records.
+- Idempotency keys and version checks prevent duplicate or stale order updates, at the cost of conflict handling.
+- The offline queue preserves staff actions through disconnects, but replay can surface conflicts that require reconciliation.
+
+## Run locally
+
+```bash
+pnpm install
+pnpm run dev:setup
+# Terminal 1: API
+pnpm run dev:api
+# Terminal 2: operations UI
+pnpm run dev:web
+```
+
+## Tests
+
+```bash
+pnpm run test
+```
+
+Count omitted: package installation and test collection were not available in this session.
+
+## Limitations
+
+- Third-party payment, messaging and model providers need credentials and were not exercised here.
+- The repository includes pilot and deployment tooling; this README makes no customer or hosted availability claim.
+
+---
+
+## Existing project documentation
+
 **RestoCafe OS** is a modern, multi-tenant SaaS Point-of-Sale (POS) platform designed for restaurants and cafés. It provides a comprehensive, real-time operations platform with kitchen management, order lifecycle automation, staff authentication, offline-first capabilities, and comprehensive audit logging.
 
 ## 🎯 Product Overview
@@ -11,7 +64,6 @@ RestoCafe OS enables restaurant and café operators to:
 - **Staff management** with fine-grained permissions and cached authentication
 - **Offline operations** with automatic sync when connectivity resumes
 - **Comprehensive audit trails** for compliance and accountability
-- **Load-tested architecture** designed for production scale
 
 ## ✨ Key Features
 
@@ -64,7 +116,6 @@ RestoCafe OS enables restaurant and café operators to:
 - **WebSocket:** Socket.IO with Redis adapter
 - **Caching:** Redis (optional) with graceful in-memory fallback
 - **Monitoring:** Prometheus metrics, slow request tracking
-- **Load Testing:** k6 with 8+ scenario scripts
 
 ### Frontend (React 19 + Vite 6)
 - **UI Framework:** React with Tailwind CSS
